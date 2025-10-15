@@ -1,7 +1,72 @@
 name: DigiCert Code Scan
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
+
 jobs:
-  noop:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+
+    permissions:
+      # required for all workflows
+      security-events: write
+
+      # required to fetch internal or private CodeQL packs
+      packages: read
+
+      # only required for workflows in private repositories
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # - This will be replaced with the generated language and build mode content on runtime
+          - language: Java
+            build-mode: none
+          - language: JavaScript
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Initializes the CodeQL tools for scanning.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{matrix.language}}'
+  sbom:
+    name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - run: echo "This is just a placeholder"
+      - name: Generate SBOM with cdxgen
+        run: |
+          docker run --rm -v "$(pwd)":/app -t ghcr.io/cyclonedx/cdxgen-java11:v11 -r . -o ./sbom-cdxgen.cyclonedx.json
+
+      - name: Install CycloneDX CLI for conversion
+        run: |
+          wget https://github.com/CycloneDX/cyclonedx-cli/releases/latest/download/cyclonedx-linux-x64 -O cyclonedx
+          chmod +x cyclonedx
+          sudo mv cyclonedx /usr/local/bin/cyclonedx
+
+      - name: Convert cyclonedx bom to to SPDX spec
+        run: |
+          if [ -f sbom-cdxgen.cyclonedx.json ]; then
+            cyclonedx convert --input-file sbom-cdxgen.cyclonedx.json --output-file sbom-cdxgen.spdx.json --output-format spdxjson
+          fi
+
+      - name: Upload SBOM by cdxgen as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cdxgen
+          path: |
+            sbom-cdxgen.cyclonedx.json
+            sbom-cdxgen.spdx.json
