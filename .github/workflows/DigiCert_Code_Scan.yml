@@ -63,8 +63,7 @@ jobs:
           name: sbom-cdxgen
           path: |
             sbom-cdxgen.cyclonedx.json
-  gitleaks:
-    name: Gitleaks secret scan (OSS binary)
+  gitleaks-oss:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,17 +73,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install gitleaks (OSS)
+      - name: Prepare tools (jq)
         run: |
-          GITLEAKS_VERSION=8.18.4
-          curl -sSL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Install gitleaks (OSS binary)
+        env:
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          set -e
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "Downloading $url"
+          for i in 1 2 3; do
+            curl -fsSL -o gitleaks.tar.gz "$url" && break || sleep 2
+          done
           tar -xzf gitleaks.tar.gz
-          sudo mv gitleaks /usr/local/bin/gitleaks
+          # The tarball usually contains a single binary named 'gitleaks'
+          test -f gitleaks || (echo "gitleaks binary not found in tarball" && ls -la && exit 1)
+          chmod +x gitleaks
+          sudo mv ./gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      - name: Run gitleaks
+      - name: Run gitleaks (filesystem)
         run: |
-          gitleaks detect --source . \
+          set -e
+          # If you have a .gitleaks.toml config, point to it via --config .gitleaks.toml
+          gitleaks detect \
+            --source . \
             --report-format json \
             --report-path gitleaks.json \
             --no-banner \
