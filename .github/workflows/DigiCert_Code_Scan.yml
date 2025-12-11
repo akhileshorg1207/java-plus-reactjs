@@ -1,7 +1,109 @@
 name: DigiCert Code Scan
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
+
 jobs:
-  noop:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+
+    permissions:
+      # required for all workflows
+      security-events: write
+
+      # required to fetch internal or private CodeQL packs
+      packages: read
+
+      # only required for workflows in private repositories
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # - This will be replaced with the generated language and build mode content on runtime
+          - language: Java
+            build-mode: none
+          - language: JavaScript
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Initializes the CodeQL tools for scanning.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{matrix.language}}'
+  sbom:
+    name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - run: echo "This is just a placeholder"
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy to generate SBOM
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: 'fs'
+          format: 'cyclonedx'
+          output: 'sbom-cdxgen.cyclonedx.json'
+      
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cdxgen
+          path: |
+            sbom-cdxgen.cyclonedx.json
+  gitleaks:
+    name: Gitleaks secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history helps catch secrets in history
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          # --redact hides secret values in logs; remove if you need raw values in report
+          args: detect --source=. --report-format=json --report-path=gitleaks.json --no-banner --redact
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-report
+          path: gitleaks.json
+
+      - name: Summarize findings
+        run: |
+          COUNT=$(jq 'if type=="array" then length else (.findings|length) end' gitleaks.json 2>/dev/null || echo 0)
+          echo "### Gitleaks Findings" >> $GITHUB_STEP_SUMMARY
+          echo "- Total: $COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Rule | File | Line | Match | Commit |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          jq -r '
+            (if type=="array" then . else .findings end) |
+            .[] | "| \(.Rule // .rule // "n/a") | \(.File // .file // "n/a") | \(.StartLine // .line // "n/a") | \(.Match // .match // "redacted") | \(.Commit // .commit // "n/a") |"
+          ' gitleaks.json 2>/dev/null >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail on findings
+        run: |
+          COUNT=$(jq 'if type=="array" then length else (.findings|length) end' gitleaks.json 2>/dev/null || echo 0)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "Secrets detected by Gitleaks: $COUNT"
+            exit 1
+          fi
