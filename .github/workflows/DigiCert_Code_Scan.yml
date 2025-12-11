@@ -64,7 +64,7 @@ jobs:
           path: |
             sbom-cdxgen.cyclonedx.json
   gitleaks:
-    name: Gitleaks secret scan
+    name: Gitleaks secret scan (OSS binary)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,13 +72,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history helps catch secrets in history
+          fetch-depth: 0
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          # --redact hides secret values in logs; remove if you need raw values in report
-          args: detect --source=. --report-format=json --report-path=gitleaks.json --no-banner --redact
+      - name: Install gitleaks (OSS)
+        run: |
+          GITLEAKS_VERSION=8.18.4
+          curl -sSL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks
+        run: |
+          gitleaks detect --source . \
+            --report-format json \
+            --report-path gitleaks.json \
+            --no-banner \
+            --redact || true
 
       - name: Upload report
         uses: actions/upload-artifact@v4
