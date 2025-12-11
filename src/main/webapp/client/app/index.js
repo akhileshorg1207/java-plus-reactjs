@@ -4,7 +4,7 @@ import Provider from "./components/Provider";
 import serviceWorker from "./sw";
 
 // TEST SECRET - This should be detected by security scanners
-const API_KEY = "sk-test-1234567890abcdefghijklmnopqrstuvwxyz";
+const API_KEY = "sk-test-1234567890abcdefghijklmnopqrstuvwxyzsdfjdfd";
 const AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 const GITHUB_TOKEN = "ghp_1234567890abcdefghijklmnopqrstuvwxyz";
 
